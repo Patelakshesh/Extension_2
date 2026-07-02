@@ -12,6 +12,14 @@
             cursor: pointer; font-size: 16px; font-weight: bold;
         }
         button:hover { background-color: #1557b0; }
+        .secondary-btn {
+            background-color: #f1f3f4;
+            color: #5f6368;
+            margin-top: 10px;
+            border: 1px solid #dadce0;
+            font-size: 14px;
+        }
+        .secondary-btn:hover { background-color: #e8eaed; }
         input[type="number"] {
             width: 100%; padding: 8px; margin-bottom: 15px;
             box-sizing: border-box; border: 1px solid #ccc;
@@ -29,6 +37,7 @@
     <input type="number" id="limit" value="150" min="10" max="1000">
 
     <button id="startScraping">Start Scraping</button>
+    <button id="clearMemory" class="secondary-btn">Clear Scraper Memory</button>
 
     <script src="popup.js"></script>
 </body>

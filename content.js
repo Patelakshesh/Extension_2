@@ -104,7 +104,7 @@ function removeBanner() {
 }
 
 // Core Logic: Extract data from the detail pane
-function extractData() {
+async function extractData() {
     let data = {
         Name: "",
         Phone: "Not available",
@@ -208,53 +208,23 @@ function extractData() {
         data.SocialLinks = socials.join(', ');
     }
 
-    // ── EMAIL (Comprehensive Multi-Source Extraction) ──────────────
-    // Source 1: mailto: links — most reliable if business added an email link
-    const mailtoLinks = document.querySelectorAll('a[href^="mailto:"]');
-    const emailSet = new Set();
-    mailtoLinks.forEach(a => {
-        const email = a.href.replace('mailto:', '').split('?')[0].trim();
-        if (email) emailSet.add(email);
-    });
-
-    // Source 2: Scan ALL visible text (body innerText) with email regex
-    const bodyText = document.body.innerText || '';
-    const bodyMatches = bodyText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || [];
-    bodyMatches.forEach(e => emailSet.add(e));
-
-    // Source 3: Scan all HTML attributes (aria-label, title, data-*, value)
-    // These can contain hidden emails Google Maps embeds in element properties
-    const allElements = document.querySelectorAll('*');
-    const attrEmailRegex = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
-    allElements.forEach(el => {
-        ['aria-label', 'title', 'data-value', 'value', 'placeholder', 'alt'].forEach(attr => {
-            const val = el.getAttribute(attr);
-            if (val) {
-                const matches = val.match(attrEmailRegex) || [];
-                matches.forEach(e => emailSet.add(e));
+    // ── EMAIL EXTRACTION (From External Website) ──────────────
+    if (data.Website !== "No Website") {
+        try {
+            const response = await new Promise((resolve) => {
+                chrome.runtime.sendMessage({ action: "fetchWebsiteEmail", url: data.Website }, (res) => {
+                    if (chrome.runtime.lastError) resolve({ emails: [] });
+                    else resolve(res || { emails: [] });
+                });
+            });
+            if (response.emails && response.emails.length > 0) {
+                data.Email = response.emails.join(', ');
             }
-        });
-    });
-
-    // Source 4: Scan "From the business" / About / Description sections specifically
-    const descSections = document.querySelectorAll(
-        '[data-attrid*="description"], [jsname="r4nke"], .PYvSYb, .HlvSq, [aria-label*="About"], [aria-label*="Description"]'
-    );
-    descSections.forEach(section => {
-        const matches = (section.innerText || '').match(attrEmailRegex) || [];
-        matches.forEach(e => emailSet.add(e));
-    });
-
-    // Filter out false positives (google, sentry, example domains)
-    const invalidDomains = ['google.com', 'google.co.in', 'sentry.io', 'example.com', 'wixpress.com', 'squarespace.com'];
-    const validEmails = [...emailSet].filter(e => {
-        const lower = e.toLowerCase();
-        return !invalidDomains.some(d => lower.includes(d)) && e.includes('@') && e.includes('.');
-    });
-
-    if (validEmails.length > 0) {
-        data.Email = validEmails.join(', ');
+        } catch (e) {
+            console.error("Failed to fetch email:", e);
+        }
     }
+
 
     let hoursDiv = document.querySelector('div[aria-label*="Hours:"], div[aria-label*="hours"]');
     if (hoursDiv && hoursDiv.getAttribute('aria-label')) {
@@ -317,6 +287,12 @@ async function startScraping(maxResults) {
     let processedLinks = new Set();
     let retries = 0;
     
+    // Load previously scraped links from memory
+    const storageData = await chrome.storage.local.get(['globalScrapedLinks']);
+    const globalScrapedLinks = new Set(storageData.globalScrapedLinks || []);
+    let newlyScrapedCount = 0;
+
+    
     showBanner();
     
     while (processedLinks.size < maxResults && retries < 5 && !window.stopScraping) {
@@ -328,7 +304,18 @@ async function startScraping(maxResults) {
         }
         
         let links = Array.from(document.querySelectorAll('a[href*="/maps/place/"]'));
-        let unprocessed = links.find(link => !processedLinks.has(link.href));
+        let unprocessed = links.find(link => !processedLinks.has(link.href) && !globalScrapedLinks.has(link.href));
+        
+        // If we only find links we've already globally scraped, just add them to the local processedLinks so we scroll past them
+        if (!unprocessed) {
+            let globallyProcessed = links.find(link => !processedLinks.has(link.href) && globalScrapedLinks.has(link.href));
+            if (globallyProcessed) {
+                processedLinks.add(globallyProcessed.href);
+                // Scroll past it quickly without clicking
+                globallyProcessed.scrollIntoView({ block: 'center' });
+                continue; 
+            }
+        }
         
         if (unprocessed) {
             retries = 0;
@@ -362,16 +349,21 @@ async function startScraping(maxResults) {
                 // SECURITY FIX: Random "reading" time before pulling data
                 await randomDelay(2000, 4500); 
                 
-                let data = extractData();
+                let data = await extractData();
                 
                 // RULE: Keep all leads (with and without website)
                 // RULE: Skip if NO Phone AND NO Email
                 if (data.Phone !== "Not available" || data.Email !== "Not available") {
                     results.push(data);
+                    newlyScrapedCount++;
                 } else {
                     console.log("Skipping lead: No phone and no email.", data.Name);
                 }
-                updateBanner(results.length, processedLinks.size);
+                
+                // Add to our global memory so we never scrape it again
+                globalScrapedLinks.add(currentUrl);
+                
+                updateBanner(newlyScrapedCount, processedLinks.size);
             }
             
             let backButton = Array.from(document.querySelectorAll('button')).find(b => 
@@ -410,6 +402,10 @@ async function startScraping(maxResults) {
     }
     
     removeBanner();
+    
+    // Save updated memory back to storage
+    await chrome.storage.local.set({ globalScrapedLinks: Array.from(globalScrapedLinks) });
+    
     exportToCSV(results);
     isRunning = false;
 }

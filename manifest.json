@@ -5,11 +5,17 @@
   "description": "Scrapes Google Maps leads. Gets both with and without websites. Skips leads with no contact info.",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage",
+    "unlimitedStorage"
   ],
   "host_permissions": [
-    "*://www.google.com/maps/*"
+    "*://www.google.com/maps/*",
+    "<all_urls>"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["*://www.google.com/maps/*"],

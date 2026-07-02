@@ -17,3 +17,9 @@ document.getElementById('startScraping').addEventListener('click', async () => {
         window.close(); // Close the popup after starting
     });
 });
+
+document.getElementById('clearMemory').addEventListener('click', () => {
+    chrome.storage.local.remove('globalScrapedLinks', () => {
+        alert("Memory completely cleared! The scraper will start completely fresh.");
+    });
+});
